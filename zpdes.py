@@ -1,5 +1,7 @@
 import numpy as np
 
+def softmax(x):
+    return np.exp(x) / np.sum(np.exp(x))
 
 """ 
     Corresponds to v_i,j
@@ -8,11 +10,11 @@ import numpy as np
     * code : identifier
     * weight : weight associated to the value for the MAB
     * next : name of the following group to be instanciated
-    * active : whether this value is currently activated (can drawn from MAB)
+    * active : whether this value is currently activated (can be drawn from MAB)
     * activation : step of ZPD expansion at which the value gets activated
 """
 class Value: 
-    def __init__(self, label, code, weight=1, next=None, active=True, activation=1):
+    def __init__(self, label, code, weight=0, next=None, active=True, activation=1):
         self.label = label
         self.code = code
         self.next = next
@@ -74,7 +76,6 @@ class Param:
 class Group:
     def __init__(self, label):
         self.label = label
-        self.scores = [] # history of passed scores when this group was involved
         self.params_dict = {} # keys = param names, values = param objects
 
     def params(self):
@@ -86,7 +87,7 @@ class Group:
     def __repr__(self) -> str:
         return self.__str__()
     def __str__(self):
-        return '(Group ' + self.label + ' ' + str(np.mean(self.scores)) + ': \n\t' + '\n\t'.join(map(str,self.params_dict.values())) + ')'
+        return '(Group ' + self.label + ': \n\t' + '\n\t'.join(map(str,self.params_dict.values())) + ')'
     
 
 class ActivitySpace:
@@ -178,15 +179,21 @@ class ZPDES:
         self.A_S.add_values('Qualité Mouvement 3', 'Niveau', [Value('niveau 1', '1', active=False, activation=5), 
                                                               Value('niveau 2', '2', active=False, activation=6),
                                                               Value('niveau 3', '3', active=False, activation=7)])
+        
     def sampleValues(self, Hx, Wx):
         h_x = []
         for i in range(len(Hx)):
-            Wx[i] = [Wx[i][j] if Hx[i].values[j].active else 0 for j in range(len(Wx[i]))] # Set deactivated values to weight 0
-            w_i = Wx[i] / np.sum(Wx[i])
-            xi_u = np.array([1 if w_i[i]!=0 else 0 for i in range(len(w_i))], dtype='float64')
+            candidates = [] # activated values
+            weights = [] # activated values' weights
+            for j in range(len(Wx[i])):
+                if Hx[i].values[j].active:
+                    candidates.append(Hx[i].values[j])
+                    weights.append(Wx[i][j])
+            w_i = softmax(weights)
+            xi_u = np.ones(len(weights), dtype='float64')
             xi_u /= np.sum(xi_u) # Uniform distribution over active values
             p_i = w_i*(1-self.gamma) + self.gamma * xi_u
-            u_i = np.random.choice(Hx[i].values, p=p_i)
+            u_i = np.random.choice(candidates, p=p_i)
             h_x.append(u_i)
         return h_x
     
@@ -203,37 +210,13 @@ class ZPDES:
         return e, ''.join([value.code for group in e for value in group])
     
 
-    # def computeReward(self, e, C):
-    #     r = []
-    #     for h_x in e:
-    #         for value in h_x:
-    #             value.scores.append(C)
-    #         h_x = h_x[0].group # Get the Group object
-    #         h_x.scores.append(C) 
-    #         d_ = min(len(h_x.scores), self.d)
-    #         print(h_x.scores[-d_:])
-    #         if d_ > 1:
-    #             # print(d_, np.sum(h_x.scores[-int(np.ceil(d_/2)):]) / np.ceil(d_/2), np.sum(h_x.scores[-d_:-int(np.ceil(d_/2))]) / (np.floor(d_/2) if d_ !=1 else 1))
-    #             r_x = np.sum(h_x.scores[-int(np.ceil(d_/2)):]) / np.ceil(d_/2) # Average scores of d_/2 last exercices for this group
-    #             r_x -= np.sum(h_x.scores[-d_:-int(np.ceil(d_/2))]) / (np.floor(d_/2) if d_ !=1 else 1) # Average scores of indexes -d_ -> -d_/2 
-    #         else:
-    #             r_x = 0
-    #         r.append(r_x)
-    #     return r
-
     def computeReward(self, e, C):
         r = []
         for h_x in e:
             for value in h_x:
                 value.scores.append(C)
-                # # Update value scores
-                # for param in h_x.params():
-                #     for value in param.values:
-                #         value.scores.append(C)
                 d_ = min(len(value.scores), self.d)
-                print(value.scores[-d_:])
                 if d_ > 1:
-                    # print(d_, np.sum(value.scores[-int(np.ceil(d_/2)):]) / np.ceil(d_/2), np.sum(value.scores[-d_:-int(np.ceil(d_/2))]) / (np.floor(d_/2) if d_ !=1 else 1))
                     r_x = np.sum(value.scores[-int(np.ceil(d_/2)):]) / np.ceil(d_/2) # Average scores of d_/2 last exercices for this group
                     r_x -= np.sum(value.scores[-d_:-int(np.ceil(d_/2))]) / (np.floor(d_/2) if d_ !=1 else 1) # Average scores of indexes -d_ -> -d_/2 
                 else:
@@ -242,34 +225,8 @@ class ZPDES:
         return r
     
 
-    # def updateZPD(self):
-    #     success_rates = []
-    #     for group in self.A_S.groups():
-    #         for param in group.params():
-    #             for value in param.values:
-    #                 if value.active:
-    #                     success_rates.append(value.success_rate())
-                        
-    #     if np.mean(success_rates) >= self.lambdaZPD:
-    #         #expand zpd
-    #         self.A_S.zpd_timestamp += 1
-
-    #         # activate values
-    #         for group in self.A_S.groups():
-    #             for param in group.params():
-    #                 for value in param.values:
-    #                     if self.A_S.zpd_timestamp == value.activation:
-    #                         value.active = True
-    #                         # value's weight is initialized at the minimum active weight of parameter
-    #                         value.weight = np.min([value.weight if value.active else 1000 for value in param.values])
-
-    #     # Deactivate levels that are too easy
-    #     for value in self.A_S.groups_dict['Souplesse Niveau'].params_dict['Niveau'].values:
-    #         if value.label == 'Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 3:
-    #             value.active = False 
-
     def updateZPD(self):
-        success_rates = []
+        # success_rates = []
         expand = True
         for group in self.A_S.groups():
             for param in group.params():
@@ -290,7 +247,7 @@ class ZPDES:
                             # value's weight is initialized at the minimum active weight of parameter
                             value.weight = np.min([value.weight if value.active else 1000 for value in param.values])
 
-        # Deactivate levels that are too easy
+        # Deactivation rules
         for value in self.A_S.groups_dict['Souplesse Niveau'].params_dict['Niveau'].values:
             if value.label == 'Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 3:
                 value.active = False 
@@ -324,27 +281,14 @@ class ZPDES:
                 value.active = False
 
 
-
-    # def update(self, e, C):
-    #     r = self.computeReward(e, C)
-    #     print(r)
-        
-    #     # Update greedy experts
-    #     for i in range(len(e)):
-    #         for u_i in e[i]:
-    #             u_i.weight = max(self.beta * u_i.weight + self.eta * r[i], 0.001)
-
-    #     self.updateZPD()
-
     def update(self, e, C):
         r = self.computeReward(e, C)
-        print(r)
         
         # Update greedy experts
         i = 0
         for h_x in e:
             for u_i in h_x:
-                u_i.weight = max(self.beta * u_i.weight + self.eta * r[i], 1e-5)
+                u_i.weight = self.beta * u_i.weight + self.eta * r[i]
                 i += 1
 
         self.updateZPD()
