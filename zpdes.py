@@ -129,9 +129,10 @@ class ActivitySpace:
     * lambdaA : success rate needed to deactivate a value
     * beta : applied to updated arm's weight
     * eta : applied to the reward to update arm
+    * softmax_factor : factor to multiply weights before softmax
 """
 class ZPDES:
-    def __init__(self, gamma, d, lambdaZPD, lambdaA, beta, eta):
+    def __init__(self, gamma, d, lambdaZPD, lambdaA, beta, eta, softmax_factor=10):
         self.init_activity_space()
         self.gamma = gamma
         self.d = d
@@ -139,6 +140,7 @@ class ZPDES:
         self.lambdaA = lambdaA
         self.beta = beta
         self.eta = eta
+        self.softmax_factor = softmax_factor
 
     def init_activity_space(self):
         self.A_S = ActivitySpace()
@@ -189,7 +191,7 @@ class ZPDES:
                 if Hx[i].values[j].active:
                     candidates.append(Hx[i].values[j])
                     weights.append(Wx[i][j])
-            w_i = softmax(weights)
+            w_i = softmax(self.softmax_factor * np.array(weights))
             xi_u = np.ones(len(weights), dtype='float64')
             xi_u /= np.sum(xi_u) # Uniform distribution over active values
             p_i = w_i*(1-self.gamma) + self.gamma * xi_u
