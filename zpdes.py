@@ -24,11 +24,17 @@ class Value:
         self.activation = activation 
     
     def success_rate(self):
-        if len(self.scores) == 0:
+        if len(self.scores) == 0 or not self.active:
             return 0
         if len(self.scores) < 4:
             return np.mean(self.scores)
         return np.mean(self.scores[-4:])
+    
+    def activate(self):
+        if self.active: return
+        self.active = True
+        # value's weight is initialized at the minimum active weight of parameter
+        self.weight = np.min([value.weight if value.active else 1000 for value in self.param.values])
     
     def set_param(self, param):
         self.param = param
@@ -52,12 +58,14 @@ class Param:
     def __init__(self, label, group):
         self.label = label
         self.values = [] # possible values of this parameter
+        self.values_dict = {} # keys = value names, values = value objects
         self.group = group
 
     def add_value(self, value):
         value.set_param(self)
         value.set_group(self.group)
         self.values.append(value)
+        self.values_dict[value.label] = value
 
     def weight(self):
         return [value.weight for value in self.values]
@@ -144,43 +152,40 @@ class ZPDES:
 
     def init_activity_space(self):
         self.A_S = ActivitySpace()
-        self.A_S.add_values('Type', 'Type', [Value('souplesse', 'S', next='Souplesse Mobilité'), 
-                                             Value('qualité', 'Q', active=False, activation=2, next='Qualité Mouvement Niveau')])
+        self.A_S.add_values('Type', 'Type', [Value('flexibility', 'F', next='Flexibility Motion'), 
+                                             Value('quality', 'Q', active=False, activation=2, next='Quality Movement Level')])
 
-        self.A_S.add_values('Souplesse Mobilité', 'Mobilité', [Value('extension', 'E', next='Souplesse Extension'), 
-                                                               Value('latéro-flexion', 'LF', next='Souplesse Latéro-Flexion'),
-                                                               Value('rotation', 'R', next='Souplesse Niveau')])
+        self.A_S.add_values('Flexibility Motion', 'Motion', [Value('extension', 'E', next='Flexibility Extension'), 
+                                                               Value('lateroflexion', 'LF', next='Flexibility Lateroflexion'),
+                                                               Value('rotation', 'R', next='Flexibility Level')])
 
-        self.A_S.add_values('Souplesse Extension', 'Mouvement', [Value('cache-tête', 'CT', next='Souplesse Niveau'), 
-                                                                 Value('arc-arrière', 'AA', next='Souplesse Niveau')])
+        self.A_S.add_values('Flexibility Extension', 'Movement', [Value('peek-a-boo', 'PB', next='Flexibility Level'), 
+                                                                 Value('back bending', 'BB', next='Flexibility Level')])
 
-        self.A_S.add_values('Souplesse Latéro-Flexion', 'Position', [Value('assis', 'A', next='Souplesse Niveau'), 
-                                                                     Value('debout', 'D', next='Souplesse Niveau')])
+        self.A_S.add_values('Flexibility Lateroflexion', 'Position', [Value('seated', 'S', next='Flexibility Level'), 
+                                                                     Value('upright', 'U', next='Flexibility Level')])
 
-        self.A_S.add_values('Souplesse Niveau', 'Niveau', [Value('Niveau 1', '1'), 
-                                                           Value('Niveau 2', '2', active=False, activation=3), 
-                                                           Value('Niveau 3', '3', active=False, activation=5)])
+        self.A_S.add_values('Flexibility Level', 'Level', [Value('level 1', '1'), 
+                                                           Value('level 2', '2', active=False, activation=3), 
+                                                           Value('level 3', '3', active=False, activation=4)])
 
-        self.A_S.add_values('Qualité Mouvement Niveau', 'Niveau', [Value('Mouvement Niveau 1', 'A', activation=2, active=False, next='Qualité Mouvement 1'),
-                                                                   Value('Mouvement Niveau 2', '', activation=3, active=False, next='Qualité Mouvement 2'),
-                                                                   Value('Mouvement Niveau 3', 'PLR', activation=5, active=False, next='Qualité Mouvement 3')])
+        self.A_S.add_values('Quality Movement Level', 'Level', [Value('movement level 1', 'B', active=False, activation=2),
+                                                                   Value('movement level 2', '', activation=3, active=False, next='Quality Movement 2'),
+                                                                   Value('movement level 3', 'FUR', activation=5, active=False, next='Quality Movement 3')])
 
-        self.A_S.add_values('Qualité Mouvement 1', 'Niveau', [Value('Niveau 1', '1', active=False, activation=2), 
-                                                              Value('Niveau 2', '2', active=False, activation=3), 
-                                                              Value('Niveau 3', '3', active=False, activation=4)])
+        self.A_S.add_values('Quality Movement 2', 'Movement', [Value('seated balance rotations', 'R', active=False, activation=3), 
+                                                                 Value('seated balance foot up', 'FU', active=False, activation=3),
+                                                                 Value('seated balance lateral movements', 'LM', active=False, activation=3),
+                                                                 Value('seated balance torso rotations', 'TR', active=False, activation=3)])
 
-        self.A_S.add_values('Qualité Mouvement 2', 'Mouvement', [Value('eq. assis rotations', 'R', active=False, activation=3), 
-                                                                 Value('eq. assis pied levé', 'PL', active=False, activation=3),
-                                                                 Value('eq. assis mvmnts latéraux', 'ML', active=False, activation=3),
-                                                                 Value('eq. assis pivot', 'P', active=False, activation=3)])
+        self.A_S.add_values('Quality Movement 2', 'Level', [Value('level 1', '1', active=False, activation=3), 
+                                                              Value('level 2', '2', active=False, activation=4),
+                                                              Value('level 3', '3', active=False, activation=5)])
 
-        self.A_S.add_values('Qualité Mouvement 2', 'Niveau', [Value('niveau 1', '1', active=False, activation=3), 
-                                                              Value('niveau 2', '2', active=False, activation=5),
-                                                              Value('niveau 3', '3', active=False, activation=6)])
-
-        self.A_S.add_values('Qualité Mouvement 3', 'Niveau', [Value('niveau 1', '1', active=False, activation=5), 
-                                                              Value('niveau 2', '2', active=False, activation=6),
-                                                              Value('niveau 3', '3', active=False, activation=7)])
+        self.A_S.add_values('Quality Movement 3', 'Level', [Value('level 1', '1', active=False, activation=5), 
+                                                              Value('level 2', '2', active=False, activation=6),
+                                                              Value('level 3', '3', active=False, activation=7)])
+        
         
     def sampleValues(self, Hx, Wx):
         h_x = []
@@ -228,7 +233,6 @@ class ZPDES:
     
 
     def updateZPD(self):
-        # success_rates = []
         expand = True
         for group in self.A_S.groups():
             for param in group.params():
@@ -245,42 +249,30 @@ class ZPDES:
                 for param in group.params():
                     for value in param.values:
                         if self.A_S.zpd_timestamp == value.activation:
-                            value.active = True
-                            # value's weight is initialized at the minimum active weight of parameter
-                            value.weight = np.min([value.weight if value.active else 1000 for value in param.values])
+                            value.activate()
+
 
         # Deactivation rules
-        for value in self.A_S.groups_dict['Souplesse Niveau'].params_dict['Niveau'].values:
-            if value.label == 'Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 3:
-                value.active = False 
-
-            if value.label == 'Niveau 2' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 5:
-                value.active = False 
+        if self.A_S.groups_dict['Flexibility Level'].params_dict['Level'].values_dict['level 1'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 3:
+            self.A_S.groups_dict['Flexibility Level'].params_dict['Level'].values_dict['level 1'].active = False
         
-        for value in self.A_S.groups_dict['Qualité Mouvement Niveau'].params_dict['Niveau'].values:
-            if value.label == 'Mouvement Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 5:
-                value.active = False 
+        if self.A_S.groups_dict['Flexibility Level'].params_dict['Level'].values_dict['level 2'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 4:
+            self.A_S.groups_dict['Flexibility Level'].params_dict['Level'].values_dict['level 2'].active = False
 
-        for value in self.A_S.groups_dict['Qualité Mouvement 1'].params_dict['Niveau'].values:
-            if value.label == 'Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 3:
-                value.active = False
+        if self.A_S.groups_dict['Quality Movement Level'].params_dict['Level'].values_dict['movement level 1'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 3:
+            self.A_S.groups_dict['Quality Movement Level'].params_dict['Level'].values_dict['movement level 1'].active = False
 
-            if value.label == 'Niveau 2' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 4:
-                value.active = False
+        if self.A_S.groups_dict['Quality Movement 2'].params_dict['Level'].values_dict['level 1'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 4:
+            self.A_S.groups_dict['Quality Movement 2'].params_dict['Level'].values_dict['level 1'].active = False
 
-        for value in self.A_S.groups_dict['Qualité Mouvement 2'].params_dict['Niveau'].values:
-            if value.label == 'Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 5:
-                value.active = False
+        if self.A_S.groups_dict['Quality Movement 2'].params_dict['Level'].values_dict['level 2'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 5:
+            self.A_S.groups_dict['Quality Movement 2'].params_dict['Level'].values_dict['level 2'].active = False
 
-            if value.label == 'Niveau 2' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 6:
-                value.active = False
+        if self.A_S.groups_dict['Quality Movement 3'].params_dict['Level'].values_dict['level 1'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 6:
+            self.A_S.groups_dict['Quality Movement 3'].params_dict['Level'].values_dict['level 1'].active = False
 
-        for value in self.A_S.groups_dict['Qualité Mouvement 3'].params_dict['Niveau'].values:
-            if value.label == 'Niveau 1' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 6:
-                value.active = False
-
-            if value.label == 'Niveau 2' and value.success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 7:
-                value.active = False
+        if self.A_S.groups_dict['Quality Movement 3'].params_dict['Level'].values_dict['level 2'].success_rate() > self.lambdaA and self.A_S.zpd_timestamp >= 7:
+            self.A_S.groups_dict['Quality Movement 3'].params_dict['Level'].values_dict['level 2'].active = False
 
 
     def update(self, e, C):
